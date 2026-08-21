@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gerador de Jogos — Loterias</title>
+<style>
+  :root{
+    --primary:#42738d;
+    --accent:#f19f53;
+    --bg:#f4f7f8;
+    --card:#ffffff;
+    --text:#22343d;
+    --border:#dbe4e8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    font-family:'Roboto', Arial, sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    margin:0;
+    padding:16px;
+  }
+  h1{ font-size:1.3rem; color:var(--primary); margin-bottom:4px; }
+  h2{ font-size:1.05rem; color:var(--primary); margin:0; }
+  p.subtitle{ margin-top:0; color:#5a6b73; font-size:0.9rem; }
+  .disclaimer{
+    font-size:0.78rem;
+    color:#8a6d3b;
+    background:#fdf3e3;
+    border:1px solid #f0d9a8;
+    border-radius:8px;
+    padding:8px 10px;
+    margin-bottom:14px;
+  }
+  .card{
+    background:var(--card);
+    border-radius:12px;
+    padding:16px;
+    margin-bottom:16px;
+    box-shadow:0 1px 3px rgba(0,0,0,0.08);
+    border:1px solid var(--border);
+  }
+  .tabs{
+    display:flex;
+    gap:6px;
+    overflow-x:auto;
+    margin-bottom:0;
+    padding-bottom:2px;
+  }
+  .tab-btn{
+    padding:10px 14px;
+    border:none;
+    border-radius:8px 8px 0 0;
+    background:#e8edef;
+    color:var(--text);
+    font-weight:bold;
+    cursor:pointer;
+    white-space:nowrap;
+    font-size:0.9rem;
+    flex-shrink:0;
+  }
+  .tab-btn.active{ background:var(--primary); color:#fff; }
+  .panel{ display:none; }
+  .panel.active{ display:block; }
+  .grid{
+    display:grid;
+    gap:6px;
+    margin-top:4px;
+  }
+  .num-btn{
+    padding:8px 0;
+    text-align:center;
+    border-radius:8px;
+    border:2px solid var(--border);
+    background:#fff;
+    font-weight:bold;
+    cursor:pointer;
+    user-select:none;
+    font-size:0.85rem;
+    transition:all .15s ease;
+  }
+  .num-btn.selected{ background:var(--primary); border-color:var(--primary); color:#fff; }
+  .status{ margin-top:12px; font-size:0.9rem; font-weight:bold; }
+  .status.ok{ color:#2e7d32; }
+  .status.bad{ color:#c0392b; }
+  .actions{ display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  button.action{
+    flex:1; min-width:110px; padding:12px; border:none; border-radius:8px;
+    font-weight:bold; cursor:pointer; font-size:0.9rem;
+  }
+  button.primary{ background:var(--accent); color:#fff; }
+  button.secondary{ background:#e8edef; color:var(--text); }
+  .game{
+    background:#fff; border:1px solid var(--border); border-left:5px solid var(--primary);
+    border-radius:8px; padding:10px 12px; margin-bottom:8px; font-size:0.95rem;
+  }
+  .game strong{ color:var(--primary); margin-right:6px; }
+  .empty-msg{ color:#5a6b73; font-size:0.9rem; }
+  #errorMsgPlaceholder{ display:none; }
+  .config-row{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
+  .config-field{ flex:1; min-width:140px; }
+  .config-field label{ display:block; font-size:0.8rem; color:#5a6b73; margin-bottom:4px; font-weight:bold; }
+  .config-field input[type="number"]{
+    width:100%; padding:10px; border-radius:8px; border:2px solid var(--border);
+    font-size:1rem; font-weight:bold; color:var(--text);
+  }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .checkbox-row input[type="checkbox"]{ width:18px; height:18px; }
+  .checkbox-row label{ margin:0; font-size:0.85rem; font-weight:normal; color:var(--text); }
+  .checkbox-row input[type="number"]{ width:64px; padding:6px; border-radius:6px; border:2px solid var(--border); font-weight:bold; }
+
+  /* Print area (hidden by default, shown only while printing) */
+  #printArea{ display:none; }
+  body.printing > *:not(#printArea){ display:none !important; }
+  body.printing #printArea{ display:block; }
+  .print-title{ margin-bottom:16px; }
+  .print-title h1{ margin:0 0 4px 0; }
+  .print-title p{ font-size:0.8rem; color:#666; margin:0; }
+  .print-game{
+    border-bottom:1px solid #ccc; padding:6px 0; font-size:0.95rem;
+  }
+  .volante-card{
+    border:2px solid #333; border-radius:6px; padding:10px; margin-bottom:16px;
+    break-inside:avoid; page-break-inside:avoid;
+  }
+  .volante-card h3{ margin:0 0 8px 0; font-size:0.95rem; }
+  .volante-grid{ display:grid; gap:4px; }
+  .volante-cell{
+    border:1px solid #999; text-align:center; padding:5px 0; font-size:0.72rem; border-radius:3px;
+  }
+  .volante-cell.marked{
+    background:var(--primary); color:#fff; font-weight:bold; border-color:var(--primary);
+  }
+  @media print{
+    body:not(.printing) #printArea{ display:none; }
+    body.printing > *:not(#printArea){ display:none !important; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Gerador de Jogos</h1>
+<p class="subtitle">Escolha a loteria, marque suas dezenas favoritas e gere jogos. Depois, imprima em lista simples ou em formato de volante para conferência.</p>
+<div class="disclaimer">
+  ⚠️ Os jogos "estilo volante" gerados aqui são um guia visual para preenchimento e conferência. Eles <strong>não substituem</strong> o volante oficial — a aposta só é válida quando registrada em uma casa lotérica autorizada ou no site/aplicativo oficial Loterias CAIXA.
+</div>
+
+<div class="tabs" id="tabsBar"></div>
+<div id="panelsContainer"></div>
+
+<div id="printArea"></div>
+
+<script>
+const LOTTERIES = {
+  lotofacil: {
+    key:'lotofacil', label:'Lotofácil', total:25, cols:5,
+    defaultGameSize:17, minGameSize:11, maxGameSize:20,
+    hint:'Loteria de 1 a 25 dezenas. Marque de 20 a 23 números para fazer bons fechamentos.',
+    consecutiveEnabledDefault:true, consecutiveDefault:15
+  },
+  megasena: {
+    key:'megasena', label:'Mega-Sena', total:60, cols:10,
+    defaultGameSize:6, minGameSize:6, maxGameSize:15,
+    hint:'Loteria de 1 a 60 dezenas. Jogo simples tem 6 números (pode apostar até 15).',
+    consecutiveEnabledDefault:false, consecutiveDefault:6
+  },
+  quina: {
+    key:'quina', label:'Quina', total:80, cols:10,
+    defaultGameSize:5, minGameSize:5, maxGameSize:15,
+    hint:'Loteria de 1 a 80 dezenas. Jogo simples tem 5 números (pode apostar até 15).',
+    consecutiveEnabledDefault:false, consecutiveDefault:5
+  },
+  duplasena: {
+    key:'duplasena', label:'Dupla-Sena', total:50, cols:10,
+    defaultGameSize:6, minGameSize:6, maxGameSize:15,
+    hint:'Loteria de 1 a 50 dezenas, com 2 sorteios por concurso. Jogo simples tem 6 números.',
+    consecutiveEnabledDefault:false, consecutiveDefault:6
+  }
+};
+
+const state = {};
+Object.keys(LOTTERIES).forEach(k => state[k] = { selected: new Set(), results: [] });
+
+function buildPanelHTML(cfg){
+  return `
+    <div class="card">
+      <p class="subtitle">${cfg.hint}</p>
+      <div class="config-row">
+        <div class="config-field">
+          <label for="gameSizeInput-${cfg.key}">Dezenas por jogo</label>
+          <input type="number" id="gameSizeInput-${cfg.key}" value="${cfg.defaultGameSize}"
+                 min="${cfg.minGameSize}" max="${cfg.maxGameSize}" oninput="updateStatus('${cfg.key}')">
+        </div>
+        <div class="config-field">
+          <label for="numGamesInput-${cfg.key}">Quantidade de jogos</label>
+          <input type="number" id="numGamesInput-${cfg.key}" value="10" min="1" max="200">
+        </div>
+      </div>
+      <div class="config-row checkbox-row">
+        <input type="checkbox" id="consecutiveToggle-${cfg.key}" ${cfg.consecutiveEnabledDefault ? 'checked' : ''}>
+        <label for="consecutiveToggle-${cfg.key}">Evitar sequência consecutiva de</label>
+        <input type="number" id="consecutiveInput-${cfg.key}" value="${cfg.consecutiveDefault}" min="2" max="${cfg.total}">
+        <label style="margin:0;">números</label>
+      </div>
+      <div class="grid" id="grid-${cfg.key}" style="grid-template-columns:repeat(${cfg.cols},1fr);"></div>
+      <div class="status" id="status-${cfg.key}">0 dezena(s) selecionada(s)</div>
+      <div class="actions">
+        <button class="action secondary" onclick="clearAll('${cfg.key}')">Limpar</button>
+        <button class="action secondary" onclick="selectAll('${cfg.key}')">Marcar todas</button>
+        <button class="action primary" onclick="generateGames('${cfg.key}')">Gerar jogos</button>
+      </div>
+      <div id="error-${cfg.key}" style="color:#c0392b;font-size:0.9rem;margin-top:8px;"></div>
+    </div>
+
+    <div class="card" id="resultsCard-${cfg.key}" style="display:none;">
+      <div class="actions" style="margin-top:0;margin-bottom:12px;">
+        <h2 style="flex:2;">Jogos gerados</h2>
+        <button class="action secondary" onclick="printList('${cfg.key}')">🖨️ Lista</button>
+        <button class="action secondary" onclick="printVolante('${cfg.key}')">🎫 Volante</button>
+      </div>
+      <div id="resultsList-${cfg.key}"></div>
+    </div>
+  `;
+}
+
+function initApp(){
+  const tabsBar = document.getElementById('tabsBar');
+  const panelsContainer = document.getElementById('panelsContainer');
+
+  Object.values(LOTTERIES).forEach((cfg, idx) => {
+    const tabBtn = document.createElement('button');
+    tabBtn.className = 'tab-btn' + (idx === 0 ? ' active' : '');
+    tabBtn.id = 'tabbtn-' + cfg.key;
+    tabBtn.textContent = cfg.label;
+    tabBtn.onclick = () => showTab(cfg.key);
+    tabsBar.appendChild(tabBtn);
+
+    const panel = document.createElement('div');
+    panel.className = 'panel' + (idx === 0 ? ' active' : '');
+    panel.id = 'panel-' + cfg.key;
+    panel.innerHTML = buildPanelHTML(cfg);
+    panelsContainer.appendChild(panel);
+
+    const gridEl = document.getElementById('grid-' + cfg.key);
+    for(let n=1; n<=cfg.total; n++){
+      const btn = document.createElement('div');
+      btn.className = 'num-btn';
+      btn.textContent = n;
+      btn.dataset.num = n;
+      btn.onclick = () => toggleNumber(cfg.key, n, btn);
+      gridEl.appendChild(btn);
+    }
+    updateStatus(cfg.key);
+  });
+}
+
+function showTab(key){
+  Object.keys(LOTTERIES).forEach(k => {
+    document.getElementById('panel-' + k).classList.toggle('active', k === key);
+    document.getElementById('tabbtn-' + k).classList.toggle('active', k === key);
+  });
+}
+
+function toggleNumber(key, n, el){
+  const st = state[key];
+  if(st.selected.has(n)){
+    st.selected.delete(n);
+    el.classList.remove('selected');
+  } else {
+    st.selected.add(n);
+    el.classList.add('selected');
+  }
+  updateStatus(key);
+}
+
+function updateStatus(key){
+  const st = state[key];
+  const cfg = LOTTERIES[key];
+  const gameSizeInput = document.getElementById('gameSizeInput-' + key);
+  const gameSize = gameSizeInput ? (parseInt(gameSizeInput.value, 10) || cfg.defaultGameSize) : cfg.defaultGameSize;
+  const statusEl = document.getElementById('status-' + key);
+  const ok = st.selected.size >= gameSize;
+  statusEl.textContent = `${st.selected.size} dezena(s) selecionada(s) — mínimo necessário: ${gameSize}`;
+  statusEl.className = 'status ' + (ok ? 'ok' : 'bad');
+}
+
+function clearAll(key){
+  const st = state[key];
+  st.selected.clear();
+  document.querySelectorAll(`#grid-${key} .num-btn`).forEach(b => b.classList.remove('selected'));
+  updateStatus(key);
+  hideResults(key);
+  document.getElementById('error-' + key).textContent = '';
+}
+
+function selectAll(key){
+  const cfg = LOTTERIES[key];
+  const st = state[key];
+  st.selected.clear();
+  for(let n=1; n<=cfg.total; n++) st.selected.add(n);
+  document.querySelectorAll(`#grid-${key} .num-btn`).forEach(b => b.classList.add('selected'));
+  updateStatus(key);
+}
+
+function hideResults(key){
+  document.getElementById('resultsCard-' + key).style.display = 'none';
+}
+
+function maxConsecutiveRun(sortedArr){
+  let max = 1, current = 1;
+  for(let i=1; i<sortedArr.length; i++){
+    if(sortedArr[i] === sortedArr[i-1] + 1){
+      current++;
+      if(current > max) max = current;
+    } else {
+      current = 1;
+    }
+  }
+  return max;
+}
+
+function sampleCombination(pool, k){
+  const arr = pool.slice();
+  for(let i=arr.length-1; i>0; i--){
+    const j = Math.floor(Math.random() * (i+1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, k).sort((a,b) => a-b);
+}
+
+function generateGames(key){
+  const cfg = LOTTERIES[key];
+  const st = state[key];
+  const errorEl = document.getElementById('error-' + key);
+  errorEl.textContent = '';
+
+  const gameSize = parseInt(document.getElementById('gameSizeInput-' + key).value, 10);
+  const numGames = parseInt(document.getElementById('numGamesInput-' + key).value, 10);
+  const consecutiveEnabled = document.getElementById('consecutiveToggle-' + key).checked;
+  const consecutiveLimit = parseInt(document.getElementById('consecutiveInput-' + key).value, 10);
+
+  if(!gameSize || gameSize < cfg.minGameSize || gameSize > cfg.maxGameSize){
+    errorEl.textContent = `"Dezenas por jogo" deve ser um número entre ${cfg.minGameSize} e ${cfg.maxGameSize}.`;
+    hideResults(key);
+    return;
+  }
+  if(st.selected.size < gameSize){
+    errorEl.textContent = `Selecione ao menos ${gameSize} dezenas (você tem ${st.selected.size}).`;
+    hideResults(key);
+    return;
+  }
+  if(!numGames || numGames < 1 || numGames > 200){
+    errorEl.textContent = `"Quantidade de jogos" deve ser um número entre 1 e 200.`;
+    hideResults(key);
+    return;
+  }
+  if(consecutiveEnabled && (!consecutiveLimit || consecutiveLimit < 2)){
+    errorEl.textContent = `Informe um tamanho de sequência válido (mínimo 2) ou desative a opção.`;
+    hideResults(key);
+    return;
+  }
+
+  const pool = Array.from(st.selected);
+  const results = [];
+  const seen = new Set();
+  const maxAttempts = 60000;
+  let attempts = 0;
+
+  while(results.length < numGames && attempts < maxAttempts){
+    attempts++;
+    const combo = sampleCombination(pool, gameSize);
+    const comboKey = combo.join(',');
+    if(seen.has(comboKey)) continue;
+    if(consecutiveEnabled && maxConsecutiveRun(combo) >= consecutiveLimit) continue;
+    seen.add(comboKey);
+    results.push(combo);
+  }
+
+  if(results.length < numGames){
+    errorEl.textContent = `Só foi possível gerar ${results.length} jogo(s) válido(s) após ${attempts} tentativas (pool pequeno ou filtro muito restritivo).`;
+  }
+
+  st.results = results;
+  renderResults(key, results);
+}
+
+function renderResults(key, results){
+  const list = document.getElementById('resultsList-' + key);
+  list.innerHTML = '';
+
+  if(results.length === 0){
+    list.innerHTML = '<p class="empty-msg">Nenhum jogo válido gerado.</p>';
+  } else {
+    results.forEach((combo, idx) => {
+      const div = document.createElement('div');
+      div.className = 'game';
+      div.innerHTML = `<strong>Jogo ${idx+1}:</strong> ${combo.join(', ')}`;
+      list.appendChild(div);
+    });
+  }
+  document.getElementById('resultsCard-' + key).style.display = 'block';
+}
+
+function printList(key){
+  const cfg = LOTTERIES[key];
+  const st = state[key];
+  if(!st.results || st.results.length === 0) return;
+
+  const area = document.getElementById('printArea');
+  let html = `<div class="print-title"><h1>${cfg.label} — Jogos Gerados</h1>
+    <p>${st.results.length} jogo(s) de ${st.results[0].length} dezenas — gerado em ${new Date().toLocaleString('pt-BR')}</p></div>`;
+
+  st.results.forEach((combo, idx) => {
+    html += `<div class="print-game"><strong>Jogo ${idx+1}:</strong> ${combo.join(', ')}</div>`;
+  });
+
+  area.innerHTML = html;
+  triggerPrint();
+}
+
+function printVolante(key){
+  const cfg = LOTTERIES[key];
+  const st = state[key];
+  if(!st.results || st.results.length === 0) return;
+
+  const area = document.getElementById('printArea');
+  let html = `<div class="print-title"><h1>${cfg.label} — Guia de Preenchimento</h1>
+    <p>Não substitui o volante oficial da Caixa. ${st.results.length} jogo(s) — gerado em ${new Date().toLocaleString('pt-BR')}.</p></div>`;
+
+  st.results.forEach((combo, idx) => {
+    html += `<div class="volante-card"><h3>Jogo ${idx+1} — ${cfg.label}</h3>
+      <div class="volante-grid" style="grid-template-columns:repeat(${cfg.cols},1fr);">`;
+    for(let n=1; n<=cfg.total; n++){
+      const marked = combo.includes(n) ? 'marked' : '';
+      html += `<div class="volante-cell ${marked}">${String(n).padStart(2,'0')}</div>`;
+    }
+    html += `</div></div>`;
+  });
+
+  area.innerHTML = html;
+  triggerPrint();
+}
+
+function triggerPrint(){
+  document.body.classList.add('printing');
+  window.print();
+}
+
+window.addEventListener('afterprint', () => {
+  document.body.classList.remove('printing');
+  document.getElementById('printArea').innerHTML = '';
+});
+
+initApp();
+</script>
+
+</body>
+</html>
