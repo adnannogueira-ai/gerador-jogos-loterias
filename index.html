@@ -109,6 +109,11 @@
   .checkbox-row input[type="checkbox"]{ width:18px; height:18px; }
   .checkbox-row label{ margin:0; font-size:0.85rem; font-weight:normal; color:var(--text); }
   .checkbox-row input[type="number"]{ width:64px; padding:6px; border-radius:6px; border:2px solid var(--border); font-weight:bold; }
+  .hot-card{ border-left:4px solid var(--accent); }
+  .hot-info{ font-size:0.82rem; color:#5a6b73; margin-top:10px; line-height:1.4; }
+  .hot-info.error{ color:#c0392b; }
+  .hot-info.loading{ color:var(--primary); font-weight:bold; }
+  button.action:disabled{ opacity:0.6; cursor:wait; }
 
   /* Print area (hidden by default, shown only while printing) */
   #printArea{ display:none; }
@@ -157,25 +162,29 @@ const LOTTERIES = {
     key:'lotofacil', label:'Lotofácil', total:25, cols:5,
     defaultGameSize:17, minGameSize:11, maxGameSize:20,
     hint:'Loteria de 1 a 25 dezenas. Marque de 20 a 23 números para fazer bons fechamentos.',
-    consecutiveEnabledDefault:true, consecutiveDefault:15
+    consecutiveEnabledDefault:true, consecutiveDefault:15,
+    apiSlugs:['lotofacil'], hotDefault:18, drawsDefault:20
   },
   megasena: {
     key:'megasena', label:'Mega-Sena', total:60, cols:10,
     defaultGameSize:6, minGameSize:6, maxGameSize:15,
     hint:'Loteria de 1 a 60 dezenas. Jogo simples tem 6 números (pode apostar até 15).',
-    consecutiveEnabledDefault:false, consecutiveDefault:6
+    consecutiveEnabledDefault:false, consecutiveDefault:6,
+    apiSlugs:['megasena','mega-sena'], hotDefault:18, drawsDefault:20
   },
   quina: {
     key:'quina', label:'Quina', total:80, cols:10,
     defaultGameSize:5, minGameSize:5, maxGameSize:15,
     hint:'Loteria de 1 a 80 dezenas. Jogo simples tem 5 números (pode apostar até 15).',
-    consecutiveEnabledDefault:false, consecutiveDefault:5
+    consecutiveEnabledDefault:false, consecutiveDefault:5,
+    apiSlugs:['quina'], hotDefault:18, drawsDefault:20
   },
   duplasena: {
     key:'duplasena', label:'Dupla-Sena', total:50, cols:10,
     defaultGameSize:6, minGameSize:6, maxGameSize:15,
     hint:'Loteria de 1 a 50 dezenas, com 2 sorteios por concurso. Jogo simples tem 6 números.',
-    consecutiveEnabledDefault:false, consecutiveDefault:6
+    consecutiveEnabledDefault:false, consecutiveDefault:6,
+    apiSlugs:['duplasena','dupla-sena'], hotDefault:18, drawsDefault:20
   }
 };
 
@@ -184,6 +193,24 @@ Object.keys(LOTTERIES).forEach(k => state[k] = { selected: new Set(), results: [
 
 function buildPanelHTML(cfg){
   return `
+    <div class="card hot-card">
+      <p class="subtitle">🔥 Buscar as dezenas mais sorteadas recentemente (fonte externa pública) e usá-las como base dos jogos.</p>
+      <div class="config-row">
+        <div class="config-field">
+          <label for="hotCountInput-${cfg.key}">Quantidade de dezenas quentes</label>
+          <input type="number" id="hotCountInput-${cfg.key}" value="${cfg.hotDefault}" min="${cfg.minGameSize}" max="${cfg.total}">
+        </div>
+        <div class="config-field">
+          <label for="drawCountInput-${cfg.key}">Concursos a analisar</label>
+          <input type="number" id="drawCountInput-${cfg.key}" value="${cfg.drawsDefault}" min="5" max="200">
+        </div>
+      </div>
+      <div class="actions" style="margin-top:0;">
+        <button class="action secondary" id="hotBtn-${cfg.key}" onclick="fetchHotNumbers('${cfg.key}')">🔥 Buscar dezenas mais sorteadas</button>
+      </div>
+      <div id="hotInfo-${cfg.key}" class="hot-info"></div>
+    </div>
+
     <div class="card">
       <p class="subtitle">${cfg.hint}</p>
       <div class="config-row">
@@ -305,6 +332,88 @@ function selectAll(key){
 
 function hideResults(key){
   document.getElementById('resultsCard-' + key).style.display = 'none';
+}
+
+async function fetchWithTimeout(url, ms){
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try{
+    const res = await fetch(url, { signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchHotNumbers(key){
+  const cfg = LOTTERIES[key];
+  const infoEl = document.getElementById('hotInfo-' + key);
+  const btnEl = document.getElementById('hotBtn-' + key);
+  const hotCount = parseInt(document.getElementById('hotCountInput-' + key).value, 10) || cfg.hotDefault;
+  const drawCount = parseInt(document.getElementById('drawCountInput-' + key).value, 10) || cfg.drawsDefault;
+
+  infoEl.className = 'hot-info loading';
+  infoEl.textContent = 'Buscando resultados recentes...';
+  btnEl.disabled = true;
+
+  let data = null;
+  let errorDetail = '';
+
+  for(const slug of cfg.apiSlugs){
+    try{
+      const res = await fetchWithTimeout(`https://loteriascaixa-api.herokuapp.com/api/${slug}`, 12000);
+      if(!res.ok){ errorDetail = `HTTP ${res.status}`; continue; }
+      const json = await res.json();
+      if(Array.isArray(json) && json.length > 0 && json[0].dezenas){
+        data = json;
+        break;
+      }
+      errorDetail = 'formato inesperado';
+    } catch(e){
+      errorDetail = e.name === 'AbortError' ? 'tempo esgotado' : (e.message || 'falha de rede/CORS');
+    }
+  }
+
+  btnEl.disabled = false;
+
+  if(!data){
+    infoEl.className = 'hot-info error';
+    infoEl.textContent = `Não foi possível buscar os resultados automaticamente agora (${errorDetail}). A API pública pode estar fora do ar ou bloqueando o acesso. Você pode conferir os últimos concursos em loterias.caixa.gov.br e marcar manualmente as dezenas mais frequentes.`;
+    return;
+  }
+
+  data.sort((a, b) => (b.concurso || 0) - (a.concurso || 0));
+  const recent = data.slice(0, drawCount);
+
+  const freq = {};
+  recent.forEach(draw => {
+    (draw.dezenas || []).forEach(d => {
+      const num = parseInt(d, 10);
+      if(!isNaN(num)) freq[num] = (freq[num] || 0) + 1;
+    });
+  });
+
+  const rankedNumbers = Object.keys(freq).map(Number).sort((a, b) => (freq[b] - freq[a]) || (a - b));
+  const hot = rankedNumbers.slice(0, hotCount);
+
+  if(hot.length === 0){
+    infoEl.className = 'hot-info error';
+    infoEl.textContent = 'A API respondeu, mas não trouxe dezenas utilizáveis. Tente novamente mais tarde.';
+    return;
+  }
+
+  clearAll(key);
+  hot.forEach(num => {
+    state[key].selected.add(num);
+    const btnNum = document.querySelector(`#grid-${key} .num-btn[data-num="${num}"]`);
+    if(btnNum) btnNum.classList.add('selected');
+  });
+  updateStatus(key);
+
+  const latestConcurso = recent[0]?.concurso ?? '?';
+  const oldestConcurso = recent[recent.length - 1]?.concurso ?? '?';
+  infoEl.className = 'hot-info';
+  infoEl.textContent = `✅ ${hot.length} dezena(s) mais sorteada(s) entre os concursos ${oldestConcurso} a ${latestConcurso} (${recent.length} concursos). Fonte: API pública loteriascaixa-api. Ajuste "Dezenas por jogo" e "Quantidade de jogos" abaixo e clique em Gerar.`;
 }
 
 function maxConsecutiveRun(sortedArr){
