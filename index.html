@@ -93,10 +93,36 @@
   button.secondary{ background:#e8edef; color:var(--text); }
   .game{
     background:#fff; border:1px solid var(--border); border-left:5px solid var(--primary);
-    border-radius:8px; padding:10px 12px; margin-bottom:8px; font-size:0.95rem;
+    border-radius:8px; padding:10px 12px; margin-bottom:10px; font-size:0.95rem;
+    transition:background .2s ease, border-color .2s ease;
   }
   .game strong{ color:var(--primary); margin-right:6px; }
   .game-check-result{ border-top:1px dashed var(--border); margin-top:8px; padding-top:6px; }
+  .game-header{
+    display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;
+  }
+  .game-header .meta{ font-size:0.78rem; color:#5a6b73; font-weight:normal; }
+  .game-numbers{ display:flex; flex-wrap:wrap; gap:6px; }
+  .number-chip{
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:30px; padding:4px 8px; border-radius:999px;
+    border:2px solid var(--border); background:var(--bg);
+    font-weight:bold; font-size:0.82rem; color:var(--text);
+  }
+  .number-chip.hit{ background:var(--primary); border-color:var(--primary); color:#fff; }
+  .number-chip.hit-second{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .game.winner{
+    background:#eaf7ee; border-color:#a9dcb5; border-left-color:#2e7d32;
+  }
+  .winner-badge{
+    display:inline-block; background:#2e7d32; color:#fff; font-weight:bold;
+    font-size:0.78rem; padding:3px 10px; border-radius:999px; margin-bottom:6px;
+  }
+  .delete-btn{
+    flex:none; border:none; background:none; cursor:pointer; font-size:1rem;
+    padding:2px 6px; border-radius:6px; color:#c0392b;
+  }
+  .delete-btn:hover{ background:#fdeaea; }
   .empty-msg{ color:#5a6b73; font-size:0.9rem; }
   #errorMsgPlaceholder{ display:none; }
   .config-row{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
@@ -532,7 +558,10 @@ function renderResults(key, results){
       div.className = 'game';
       div.id = `game-${key}-${idx}`;
       div.dataset.numbers = JSON.stringify(combo);
-      div.innerHTML = `<strong>Jogo ${idx+1}:</strong> <span class="game-numbers">${combo.join(', ')}</span>`;
+      const chips = combo.map(n => `<span class="number-chip" data-n="${n}">${n}</span>`).join('');
+      div.innerHTML = `
+        <div class="game-header"><strong>Jogo ${idx+1}</strong></div>
+        <div class="game-numbers">${chips}</div>`;
       list.appendChild(div);
     });
   }
@@ -654,11 +683,13 @@ function renderSavedList(key){
     div.id = 'saved-' + key + '-' + g.id;
     div.dataset.numbers = JSON.stringify(g.numbers);
     const dateLabel = new Date(g.savedAt).toLocaleString('pt-BR');
+    const chips = g.numbers.map(n => `<span class="number-chip" data-n="${n}">${n}</span>`).join('');
     div.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-        <div><strong>${dateLabel}:</strong> <span class="game-numbers">${g.numbers.join(', ')}</span></div>
-        <button class="action secondary" style="flex:none;padding:4px 10px;font-size:0.8rem;" onclick="deleteSavedGame('${key}','${g.id}')">🗑️</button>
-      </div>`;
+      <div class="game-header">
+        <span class="meta">Salvo em ${dateLabel}</span>
+        <button class="delete-btn" onclick="deleteSavedGame('${key}','${g.id}')" title="Excluir">🗑️</button>
+      </div>
+      <div class="game-numbers">${chips}</div>`;
     list.appendChild(div);
   });
 }
@@ -734,14 +765,40 @@ async function checkResults(key, games, infoElId, listElIdPrefix){
     const el = document.getElementById(`${listElIdPrefix}${idx}`) || document.getElementById(game._elId || '');
     if(!el) return;
 
-    let resultHtml = `<div style="margin-top:6px;font-size:0.85rem;">
+    el.classList.remove('winner');
+    el.querySelectorAll('.number-chip').forEach(chip => { chip.classList.remove('hit', 'hit-second'); });
+    numbers.forEach(n => {
+      const chip = el.querySelector(`.number-chip[data-n="${n}"]`);
+      if(chip && mainNumbers.includes(n)) chip.classList.add('hit');
+    });
+
+    const isWinnerMain = (PRIZE_TIERS[key] || []).includes(hitsMain.length);
+
+    let resultHtml = '';
+    let isWinnerSecond = false;
+    let hitsSecond = [];
+
+    if(key === 'duplasena' && secondNumbers){
+      hitsSecond = numbers.filter(n => secondNumbers.includes(n));
+      numbers.forEach(n => {
+        const chip = el.querySelector(`.number-chip[data-n="${n}"]`);
+        if(chip && secondNumbers.includes(n)) chip.classList.add('hit-second');
+      });
+      isWinnerSecond = (PRIZE_TIERS[key] || []).includes(hitsSecond.length);
+    }
+
+    if(isWinnerMain || isWinnerSecond){
+      el.classList.add('winner');
+      resultHtml += `<div class="winner-badge">🏆 Faixa de premiação batida!</div>`;
+    }
+
+    resultHtml += `<div style="font-size:0.85rem;">
       <span style="color:var(--primary);font-weight:bold;">1º sorteio — ${tierLabel(key, hitsMain.length)}</span>
       ${hitsMain.length ? ` (acertos: ${hitsMain.sort((a,b)=>a-b).join(', ')})` : ''}`;
 
     if(key === 'duplasena'){
       if(secondNumbers){
-        const hitsSecond = numbers.filter(n => secondNumbers.includes(n));
-        resultHtml += `<br><span style="color:var(--primary);font-weight:bold;">2º sorteio — ${tierLabel(key, hitsSecond.length)}</span>
+        resultHtml += `<br><span style="color:var(--accent);font-weight:bold;">2º sorteio — ${tierLabel(key, hitsSecond.length)}</span>
           ${hitsSecond.length ? ` (acertos: ${hitsSecond.sort((a,b)=>a-b).join(', ')})` : ''}`;
       } else {
         resultHtml += `<br><span style="color:#8a6d3b;">2º sorteio: não identificado nesta fonte de dados.</span>`;
