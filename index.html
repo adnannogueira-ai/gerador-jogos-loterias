@@ -96,6 +96,7 @@
     border-radius:8px; padding:10px 12px; margin-bottom:8px; font-size:0.95rem;
   }
   .game strong{ color:var(--primary); margin-right:6px; }
+  .game-check-result{ border-top:1px dashed var(--border); margin-top:8px; padding-top:6px; }
   .empty-msg{ color:#5a6b73; font-size:0.9rem; }
   #errorMsgPlaceholder{ display:none; }
   .config-row{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
@@ -246,7 +247,22 @@ function buildPanelHTML(cfg){
         <button class="action secondary" onclick="printList('${cfg.key}')">🖨️ Lista</button>
         <button class="action secondary" onclick="printVolante('${cfg.key}')">🎫 Volante</button>
       </div>
+      <div class="actions" style="margin-top:0;margin-bottom:12px;">
+        <button class="action secondary" onclick="saveCurrentGames('${cfg.key}')">💾 Salvar estes jogos</button>
+        <button class="action secondary" onclick="checkCurrentResults('${cfg.key}')">🔍 Conferir com último sorteio</button>
+      </div>
+      <div id="checkInfo-${cfg.key}" class="hot-info"></div>
       <div id="resultsList-${cfg.key}"></div>
+    </div>
+
+    <div class="card" id="savedCard-${cfg.key}" style="display:none;">
+      <div class="actions" style="margin-top:0;margin-bottom:12px;">
+        <h2 style="flex:2;">🗂️ Jogos salvos</h2>
+        <button class="action secondary" onclick="checkSavedResults('${cfg.key}')">🔍 Conferir todos</button>
+        <button class="action secondary" onclick="clearSavedGames('${cfg.key}')">🗑️ Limpar tudo</button>
+      </div>
+      <div id="savedCheckInfo-${cfg.key}" class="hot-info"></div>
+      <div id="savedList-${cfg.key}"></div>
     </div>
   `;
 }
@@ -279,6 +295,7 @@ function initApp(){
       gridEl.appendChild(btn);
     }
     updateStatus(cfg.key);
+    renderSavedList(cfg.key);
   });
 }
 
@@ -345,17 +362,8 @@ async function fetchWithTimeout(url, ms){
   }
 }
 
-async function fetchHotNumbers(key){
+async function fetchDraws(key){
   const cfg = LOTTERIES[key];
-  const infoEl = document.getElementById('hotInfo-' + key);
-  const btnEl = document.getElementById('hotBtn-' + key);
-  const hotCount = parseInt(document.getElementById('hotCountInput-' + key).value, 10) || cfg.hotDefault;
-  const drawCount = parseInt(document.getElementById('drawCountInput-' + key).value, 10) || cfg.drawsDefault;
-
-  infoEl.className = 'hot-info loading';
-  infoEl.textContent = 'Buscando resultados recentes...';
-  btnEl.disabled = true;
-
   let data = null;
   let errorDetail = '';
 
@@ -374,16 +382,33 @@ async function fetchHotNumbers(key){
     }
   }
 
+  if(!data) return { draws: null, errorDetail };
+  data.sort((a, b) => (b.concurso || 0) - (a.concurso || 0));
+  return { draws: data, errorDetail: '' };
+}
+
+async function fetchHotNumbers(key){
+  const cfg = LOTTERIES[key];
+  const infoEl = document.getElementById('hotInfo-' + key);
+  const btnEl = document.getElementById('hotBtn-' + key);
+  const hotCount = parseInt(document.getElementById('hotCountInput-' + key).value, 10) || cfg.hotDefault;
+  const drawCount = parseInt(document.getElementById('drawCountInput-' + key).value, 10) || cfg.drawsDefault;
+
+  infoEl.className = 'hot-info loading';
+  infoEl.textContent = 'Buscando resultados recentes...';
+  btnEl.disabled = true;
+
+  const { draws, errorDetail } = await fetchDraws(key);
+
   btnEl.disabled = false;
 
-  if(!data){
+  if(!draws){
     infoEl.className = 'hot-info error';
     infoEl.textContent = `Não foi possível buscar os resultados automaticamente agora (${errorDetail}). A API pública pode estar fora do ar ou bloqueando o acesso. Você pode conferir os últimos concursos em loterias.caixa.gov.br e marcar manualmente as dezenas mais frequentes.`;
     return;
   }
 
-  data.sort((a, b) => (b.concurso || 0) - (a.concurso || 0));
-  const recent = data.slice(0, drawCount);
+  const recent = draws.slice(0, drawCount);
 
   const freq = {};
   recent.forEach(draw => {
@@ -497,6 +522,7 @@ function generateGames(key){
 function renderResults(key, results){
   const list = document.getElementById('resultsList-' + key);
   list.innerHTML = '';
+  document.getElementById('checkInfo-' + key).textContent = '';
 
   if(results.length === 0){
     list.innerHTML = '<p class="empty-msg">Nenhum jogo válido gerado.</p>';
@@ -504,7 +530,9 @@ function renderResults(key, results){
     results.forEach((combo, idx) => {
       const div = document.createElement('div');
       div.className = 'game';
-      div.innerHTML = `<strong>Jogo ${idx+1}:</strong> ${combo.join(', ')}`;
+      div.id = `game-${key}-${idx}`;
+      div.dataset.numbers = JSON.stringify(combo);
+      div.innerHTML = `<strong>Jogo ${idx+1}:</strong> <span class="game-numbers">${combo.join(', ')}</span>`;
       list.appendChild(div);
     });
   }
@@ -560,6 +588,190 @@ window.addEventListener('afterprint', () => {
   document.body.classList.remove('printing');
   document.getElementById('printArea').innerHTML = '';
 });
+
+/* ---------- Jogos salvos (localStorage) ---------- */
+
+const SAVED_GAMES_KEY = 'loterias_jogos_salvos_v1';
+
+function loadAllSavedGames(){
+  try{
+    const raw = localStorage.getItem(SAVED_GAMES_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch(e){
+    return {};
+  }
+}
+
+function persistAllSavedGames(all){
+  try{
+    localStorage.setItem(SAVED_GAMES_KEY, JSON.stringify(all));
+    return true;
+  } catch(e){
+    return false;
+  }
+}
+
+function saveCurrentGames(key){
+  const st = state[key];
+  if(!st.results || st.results.length === 0) return;
+
+  const all = loadAllSavedGames();
+  if(!all[key]) all[key] = [];
+
+  const now = new Date().toISOString();
+  st.results.forEach(combo => {
+    all[key].push({ id: 'g' + Date.now() + Math.random().toString(36).slice(2, 7), numbers: combo, savedAt: now });
+  });
+
+  const ok = persistAllSavedGames(all);
+  const infoEl = document.getElementById('checkInfo-' + key);
+  infoEl.className = ok ? 'hot-info' : 'hot-info error';
+  infoEl.textContent = ok
+    ? `✅ ${st.results.length} jogo(s) salvo(s) neste navegador. Veja em "Jogos salvos" abaixo.`
+    : 'Não foi possível salvar (armazenamento local indisponível ou cheio).';
+
+  renderSavedList(key);
+}
+
+function renderSavedList(key){
+  const all = loadAllSavedGames();
+  const games = all[key] || [];
+  const card = document.getElementById('savedCard-' + key);
+  const list = document.getElementById('savedList-' + key);
+  document.getElementById('savedCheckInfo-' + key).textContent = '';
+
+  if(games.length === 0){
+    card.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+
+  card.style.display = 'block';
+  list.innerHTML = '';
+  games.forEach(g => {
+    const div = document.createElement('div');
+    div.className = 'game';
+    div.id = 'saved-' + key + '-' + g.id;
+    div.dataset.numbers = JSON.stringify(g.numbers);
+    const dateLabel = new Date(g.savedAt).toLocaleString('pt-BR');
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div><strong>${dateLabel}:</strong> <span class="game-numbers">${g.numbers.join(', ')}</span></div>
+        <button class="action secondary" style="flex:none;padding:4px 10px;font-size:0.8rem;" onclick="deleteSavedGame('${key}','${g.id}')">🗑️</button>
+      </div>`;
+    list.appendChild(div);
+  });
+}
+
+function deleteSavedGame(key, id){
+  const all = loadAllSavedGames();
+  if(!all[key]) return;
+  all[key] = all[key].filter(g => g.id !== id);
+  persistAllSavedGames(all);
+  renderSavedList(key);
+}
+
+function clearSavedGames(key){
+  const all = loadAllSavedGames();
+  all[key] = [];
+  persistAllSavedGames(all);
+  renderSavedList(key);
+}
+
+/* ---------- Conferência com o último sorteio ---------- */
+
+const PRIZE_TIERS = {
+  lotofacil: [15, 14, 13, 12, 11],
+  megasena: [6, 5, 4],
+  quina: [5, 4, 3, 2],
+  duplasena: [6, 5, 4]
+};
+
+function tierLabel(key, hits){
+  const tiers = PRIZE_TIERS[key] || [];
+  return tiers.includes(hits) ? `${hits} acertos 🏆` : `${hits} acertos`;
+}
+
+// Tenta achar um segundo array de dezenas no objeto do concurso (usado pela Dupla-Sena).
+// Não asseguramos o nome exato do campo na API pública, então detectamos de forma genérica.
+function extractSecondDraw(draw){
+  for(const k of Object.keys(draw)){
+    if(k === 'dezenas') continue;
+    const v = draw[k];
+    if(Array.isArray(v) && v.length >= 2 && v.every(x => !isNaN(parseInt(x, 10)))){
+      return v.map(x => parseInt(x, 10));
+    }
+  }
+  return null;
+}
+
+async function checkResults(key, games, infoElId, listElIdPrefix){
+  const infoEl = document.getElementById(infoElId);
+  if(!games || games.length === 0){
+    infoEl.className = 'hot-info error';
+    infoEl.textContent = 'Não há jogos para conferir.';
+    return;
+  }
+
+  infoEl.className = 'hot-info loading';
+  infoEl.textContent = 'Buscando o último sorteio...';
+
+  const { draws, errorDetail } = await fetchDraws(key);
+
+  if(!draws){
+    infoEl.className = 'hot-info error';
+    infoEl.textContent = `Não foi possível buscar o último sorteio agora (${errorDetail}). Confira manualmente em loterias.caixa.gov.br.`;
+    return;
+  }
+
+  const latest = draws[0];
+  const mainNumbers = (latest.dezenas || []).map(d => parseInt(d, 10));
+  const secondNumbers = key === 'duplasena' ? extractSecondDraw(latest) : null;
+
+  games.forEach((game, idx) => {
+    const numbers = game.numbers || game;
+    const hitsMain = numbers.filter(n => mainNumbers.includes(n));
+    const el = document.getElementById(`${listElIdPrefix}${idx}`) || document.getElementById(game._elId || '');
+    if(!el) return;
+
+    let resultHtml = `<div style="margin-top:6px;font-size:0.85rem;">
+      <span style="color:var(--primary);font-weight:bold;">1º sorteio — ${tierLabel(key, hitsMain.length)}</span>
+      ${hitsMain.length ? ` (acertos: ${hitsMain.sort((a,b)=>a-b).join(', ')})` : ''}`;
+
+    if(key === 'duplasena'){
+      if(secondNumbers){
+        const hitsSecond = numbers.filter(n => secondNumbers.includes(n));
+        resultHtml += `<br><span style="color:var(--primary);font-weight:bold;">2º sorteio — ${tierLabel(key, hitsSecond.length)}</span>
+          ${hitsSecond.length ? ` (acertos: ${hitsSecond.sort((a,b)=>a-b).join(', ')})` : ''}`;
+      } else {
+        resultHtml += `<br><span style="color:#8a6d3b;">2º sorteio: não identificado nesta fonte de dados.</span>`;
+      }
+    }
+    resultHtml += `</div>`;
+
+    let base = el.querySelector('.game-check-result');
+    if(!base){
+      base = document.createElement('div');
+      base.className = 'game-check-result';
+      el.appendChild(base);
+    }
+    base.innerHTML = resultHtml;
+  });
+
+  infoEl.className = 'hot-info';
+  infoEl.textContent = `✅ Conferido com o concurso ${latest.concurso}${latest.data ? ' (' + latest.data + ')' : ''}. Fonte: API pública loteriascaixa-api.`;
+}
+
+function checkCurrentResults(key){
+  const st = state[key];
+  checkResults(key, st.results, 'checkInfo-' + key, `game-${key}-`);
+}
+
+function checkSavedResults(key){
+  const all = loadAllSavedGames();
+  const games = (all[key] || []).map(g => ({ ...g, _elId: 'saved-' + key + '-' + g.id }));
+  checkResults(key, games, 'savedCheckInfo-' + key, null);
+}
 
 initApp();
 </script>
