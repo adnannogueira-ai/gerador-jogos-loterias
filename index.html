@@ -123,6 +123,14 @@
     padding:2px 6px; border-radius:6px; color:#c0392b;
   }
   .delete-btn:hover{ background:#fdeaea; }
+  .summary-block{ margin-top:10px; }
+  .summary-label{ font-size:0.78rem; color:#5a6b73; font-weight:bold; margin-bottom:4px; }
+  .summary-row{ display:flex; flex-wrap:wrap; gap:6px; }
+  .summary-chip{
+    background:var(--bg); border:1px solid var(--border); border-radius:8px;
+    padding:4px 9px; font-size:0.8rem; color:var(--text);
+  }
+  .summary-chip.prize{ background:#eaf7ee; border-color:#a9dcb5; color:#2e7d32; font-weight:bold; }
   .empty-msg{ color:#5a6b73; font-size:0.9rem; }
   #errorMsgPlaceholder{ display:none; }
   .config-row{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
@@ -723,6 +731,19 @@ function tierLabel(key, hits){
   return tiers.includes(hits) ? `${hits} acertos 🏆` : `${hits} acertos`;
 }
 
+function buildSummaryHtml(key, hitsArr, label){
+  if(hitsArr.length === 0) return '';
+  const tally = {};
+  hitsArr.forEach(h => { tally[h] = (tally[h] || 0) + 1; });
+  const sortedHits = Object.keys(tally).map(Number).sort((a, b) => b - a);
+  const tiers = PRIZE_TIERS[key] || [];
+  const chips = sortedHits.map(h => {
+    const isPrize = tiers.includes(h);
+    return `<span class="summary-chip${isPrize ? ' prize' : ''}">${h} acerto${h === 1 ? '' : 's'}: <strong>${tally[h]}</strong></span>`;
+  }).join('');
+  return `<div class="summary-block"><div class="summary-label">${label}</div><div class="summary-row">${chips}</div></div>`;
+}
+
 // Tenta achar um segundo array de dezenas no objeto do concurso (usado pela Dupla-Sena).
 // Não asseguramos o nome exato do campo na API pública, então detectamos de forma genérica.
 function extractSecondDraw(draw){
@@ -758,10 +779,13 @@ async function checkResults(key, games, infoElId, listElIdPrefix){
   const latest = draws[0];
   const mainNumbers = (latest.dezenas || []).map(d => parseInt(d, 10));
   const secondNumbers = key === 'duplasena' ? extractSecondDraw(latest) : null;
+  const hitsMainArr = [];
+  const hitsSecondArr = [];
 
   games.forEach((game, idx) => {
     const numbers = game.numbers || game;
     const hitsMain = numbers.filter(n => mainNumbers.includes(n));
+    hitsMainArr.push(hitsMain.length);
     const el = document.getElementById(`${listElIdPrefix}${idx}`) || document.getElementById(game._elId || '');
     if(!el) return;
 
@@ -780,6 +804,7 @@ async function checkResults(key, games, infoElId, listElIdPrefix){
 
     if(key === 'duplasena' && secondNumbers){
       hitsSecond = numbers.filter(n => secondNumbers.includes(n));
+      hitsSecondArr.push(hitsSecond.length);
       numbers.forEach(n => {
         const chip = el.querySelector(`.number-chip[data-n="${n}"]`);
         if(chip && secondNumbers.includes(n)) chip.classList.add('hit-second');
@@ -815,8 +840,13 @@ async function checkResults(key, games, infoElId, listElIdPrefix){
     base.innerHTML = resultHtml;
   });
 
+  let summaryHtml = buildSummaryHtml(key, hitsMainArr, `Resumo — 1º sorteio (${games.length} jogo${games.length === 1 ? '' : 's'})`);
+  if(key === 'duplasena' && secondNumbers){
+    summaryHtml += buildSummaryHtml(key, hitsSecondArr, 'Resumo — 2º sorteio');
+  }
+
   infoEl.className = 'hot-info';
-  infoEl.textContent = `✅ Conferido com o concurso ${latest.concurso}${latest.data ? ' (' + latest.data + ')' : ''}. Fonte: API pública loteriascaixa-api.`;
+  infoEl.innerHTML = `✅ Conferido com o concurso ${latest.concurso}${latest.data ? ' (' + latest.data + ')' : ''}. Fonte: API pública loteriascaixa-api.${summaryHtml}`;
 }
 
 function checkCurrentResults(key){
